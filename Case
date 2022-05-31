@@ -1,0 +1,212 @@
+-- Selecionando a base de dados que será utilizada
+use ARQUIVEI;
+
+-- Mostrando itens das tabelas para verificar se os dados foram importados corretamente
+select * from Item; 
+select * from xml;
+
+-- Verificando a estrutura das colunas da tabela
+exec sp_columns Item;
+exec sp_columns xml;
+
+-- Alterando o tipo da coluna para decimal com duas casas depois da vírgula (estava sendo importado como float)
+Alter table Item
+Alter column VUnCom decimal (10,2); 
+
+Alter table Item
+Alter column VProd decimal (10,2);
+
+-- Alterando colunas que estavam como varchar para decimal.
+Alter table xml
+Alter column VNF float;
+
+Alter table xml
+Alter column VNF decimal(20,2);
+
+Alter table xml
+Alter column VICMS decimal(20,2);
+
+
+/*
+Questao 1 - Qual a relação entre as tabelas? 1:1, 1:n, n:n?
+Aqui podemos notar que para um mesmo accesskey, podemos ter vários registros na tabela Item
+mas com cean diferente. Isso mostra que o relacionamento é 1:n (1 xml para n itens)
+
+Resposta: Relação de 1:n
+*/
+
+select *
+from Item
+where accesskey in (
+	select accesskey
+	from Item
+	group by accesskey
+	having count(accesskey)>1
+)
+order by accesskey asc;
+
+select * from xml where accesskey=17;
+
+/*
+Questao 2 - Existe alguma accesskey que está em uma das tabelas e não tem nenhum correspondente na outra tabela? 
+(Ex: accesskey 1 só tem na tabela de xml, mas não tem na de itens ou vice-versa)
+
+Resposta: Não existe accesskey que está em uma das tabelas e não tem nenhum correspondente na outra tabela.
+*/
+
+-- Aqui verificamos que não existe nenhuma accesskey presente na tabela xml que não está na tabela item
+select * from xml as x
+where x.accesskey not in (select accesskey from Item);
+
+-- Aqui verificamos que não existe nenhuma accesskey presente na tabela Item que não está na tabela xml
+select * from Item as i
+where i.accesskey not in (select accesskey from xml);
+
+/*
+Questao 3 - Quantas notas fiscais foram emitidas no total? Qual o valor financeiro total dessas emissões?
+
+Resposta: Foram emitidas 227314 notas no total.
+		  O valor financeiro total dessas emissões (soma dos valores de VNF) é de: R$439086878,54
+*/
+
+-- Total de notas fiscais emitidas
+select count(accesskey) as Total_NF_Emitidas from xml;
+
+-- Valor financeiro total das emissões
+select sum(round(VNF, 2)) as Valor_Financeiro_Total from xml;
+
+/*
+Questao 4 - Selecione todas as empresas que são emissores de São Paulo, quantas foram listadas?
+A query abaixo traz a lista das empresas emissoras do estado de São Paulo
+
+Resposta: Foram listadas 93545
+*/
+
+-- Selecionando todas as empressas que são emissores de São Paulo
+select * from xml where emit_uf='SP';
+
+-- Quantidade listada de empresas emissoras do estado de São Paulo
+select count(*) from xml where emit_uf='SP'; 
+
+/*
+Questao 5 - Qual foi o total de ICMS recolhido por cada um dos estados?
+
+Resposta: -- Assumindo que o estado responsável pelo recolhimento do ICMS é o estado de destino podemos obter o total recolhido por estado com a query abaixo:
+*/
+
+-- Query que mostra o total de ICMS recolhido por estado
+select dest_uf, sum(VICMS) as Total_ICMS_recolhido from xml group by dest_uf;
+
+/*
+Questao 6 - Quantos itens foram comercializados com cada um dos CFOPs(Código fiscal de operação)?
+
+Resposta: Podemos observar a quantidade total de itens comercializados por CFOP pela query abaixo:
+*/
+
+-- Foram somados os itens comercializados de cada uma das CFOPs
+select CFOP, sum(QCom) as QCom_Total from Item group by CFOP;
+
+/*
+Questao 7 - Liste todos os produtos que foram vendidos para o estado de Santa Catarina. Quantos produtos foram listados?
+
+Resposta: Foram vendidos e listados 10 produtos (2, 3, 6, 4, 10, 7, 8, 5, 1, 9). 
+*/
+-- Lista de produtos que foram vendidos para o estado de Santa Catarina
+select distinct i.cean as Prod_vend, x.dest_uf as UF
+from xml as x
+join Item as i on x.accesskey=i.accesskey
+where x.dest_uf='SC';
+
+-- Foram listados
+select count(distinct i.cean) as Prod_vend
+from xml as x
+join Item as i on x.accesskey=i.accesskey
+where x.dest_uf='SC';
+
+/* 
+Questao 8 - Quais os 5 produtos mais comprados pela empresa de Id 3619?
+
+Resposta: Os produtos mais comprados pela empresa Id 3619 são (4, 1, 9, 8, 5)
+*/
+-- Primeiramente selecionei apenas as notas referentes a empresa (Estado) de Id 3619
+select * from xml where dest_id=3619;
+
+-- Aqui fiz a junção das tabelas Item e xml para obter todos os dados referentes as notas e itens comprados pela empresa 3619
+select *
+from xml as x
+join Item as i on x.accesskey=i.accesskey
+where x.dest_id=3619;
+
+-- Ordenei os resultados trazendo a soma da quantidade(qcom) de cada produto(cean) comprado
+select i.cean, sum(i.QCom) as QCom_Total
+from xml as x
+join Item as i on x.accesskey=i.accesskey
+where x.dest_id=3619
+group by i.cean
+order by QCom_Total desc;
+
+-- Finalmente listei os cinco produtos mais comprados pela empresa Id 3619 com suas respectivas quantidades
+select i.cean, sum(i.QCom) as QCom_Total
+from xml as x
+join Item as i on x.accesskey=i.accesskey
+where x.dest_id=3619
+group by i.cean
+order by QCom_Total desc
+offset 0 rows fetch next 5 rows only; -- usei essa sintaxe pois utilizei o Microsoft SQL Server Management Studio 
+
+/*
+Questao 9 - Faça um ranking com os 5 maiores fornecedores em relação ao total de itens vendidos para cada destinatário. 
+Sua resposta deve ter as seguintes colunas ID destinatário; ID emissor; Rank.
+Resposta: Tentei fazer por aqui, porém não consegui criar uma tabela auxiliar ou temporária para trazer apenas as colunas pedidas, portanto obtive sucesso utilizando R
+*/ 
+-- Tentativa
+select x.emit_id as ID_emissor, x.dest_id as ID_destinatário, i.QCom,
+	rank() over(order by i.QCom desc) as 'Rank'
+from xml as x 
+	join Item as i on x.accesskey=i.accesskey
+group by x.emit_id, x.dest_id, i.QCom;
+
+
+/*
+Questào 10 - Sugestão* Faça análises descritivas sobre os dados e encontre algo que você considera interessante com os dados disponibilizados 
+(ou apenas descreva o que consideraria interessante de se analisar com os dados disponibilizados). * item não obrigatório, caso faça crie um 
+storytelling sobre o que pretendia analisar, como foi feita a análise e o resultado obtido.
+*/
+
+-- Entendimento to banco de dados e seus relacionamentos
+select * from Item;
+select count(accesskey) from Item;
+select count(distinct accesskey) from Item;
+
+select * from xml;
+select count(accesskey) from xml;
+select count(distinct accesskey) from xml;
+
+-- Exibe accesskey com mais de um registro na tabela xml
+select accesskey
+from xml
+group by accesskey
+having count(accesskey)>1
+order by accesskey asc;
+-- Mostrar todos as colunas da tabela xml com accesskey duplicados
+select *
+from xml
+where accesskey in (
+	select accesskey
+	from xml
+	group by accesskey
+	having count(accesskey)>1
+)
+order by accesskey asc;
+
+
+-- Mostrar todos as colunas da tabela Item com accesskey duplicados
+select accesskey
+from Item
+group by accesskey
+having count(accesskey)>1
+order by accesskey asc;
+
+
+
+
